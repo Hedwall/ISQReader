@@ -51,16 +51,6 @@ public class ISQReader extends FormatReader {
 
     // -- IFormatReader API methods --
 
-    public int getOptimalTileHeight() {
-        FormatTools.assertId(this.currentId, true, 1);
-        return this.getSizeY();
-    }
-
-    public int getOptimalTileWidth(){
-        FormatTools.assertId(this.currentId,true,1);
-        return  this.getSizeX();
-    }
-
 
     /* @see loci.formats.IFormatReader#isThisType(RandomAccessInputStream) */
     public boolean isThisType(RandomAccessInputStream stream) throws IOException {
@@ -96,7 +86,7 @@ public class ISQReader extends FormatReader {
             this.nDimensions =0;
         }
     }
-    // fler cases att täcka?
+    
 
 
     // -- Internal FormatReader API methods --
