@@ -71,7 +71,7 @@ public class ISQReader extends FormatReader {
         this.in.seek(512L + (long)no * planeSize);
         this.readPlane(this.in, x, y, w, h,0, buf);
 
-        LOGGER.info("@openBytes method");
+        //LOGGER.info("@openBytes method");
         return buf;
     }
 
@@ -92,15 +92,12 @@ public class ISQReader extends FormatReader {
     @Override
     protected void initFile(String id) throws FormatException, IOException {
         super.initFile(id);
-        this.in = new RandomAccessInputStream(id);
-        currentId = id;
-
+        in = new RandomAccessInputStream(id);
+        in.order(true);
         boolean isSigned = true;
 
-        //setId(id);
-
         LOGGER.info("Looking for header file");
-        String header = this.in.readString(128);
+        //String header = this.in.readString(128);
 
             /*String magic = in.readString(16);
             if (magic != ISQ_MAGIC_STRING) {
@@ -108,24 +105,35 @@ public class ISQReader extends FormatReader {
             }*/
 
         LOGGER.info("Reading header");
+            int [] META = new int[32];
+            for(int i=0; i<META.length; i++){
+                META[i] = in.readInt();
+            }
 
             String imageName = in.readString(40); //name at char[40]
-            String first16 = this.in.readString(16);
+            String first16 = in.readString(16);
             boolean identifier = first16.startsWith("CTDATA-HEADER_V1");
-            CoreMetadata m = this.core.get(0);
+            //in.seek(16);
+            int dataType = META[4];
+            int nr_of_bytes = META[5];
+            int nr_of_blocks = META[6];
+            int patient_index = META[7];
+            int scanner_id = META[8];
+            String creation_date = in.readByteToString(4);
+            CoreMetadata m = core.get(0);
 
-            if (identifier = true) {
 
-                in.seek(43);
+
+                //in.seek(43);
                 //in.skipBytes(27);
                 /**check position for seek() function against MatLab, which value is correct */
 
                 //dimx_p is the dimension in pixels, dimx_um the dimension in microns.
-                m.sizeX = (int) in.readUnsignedInt(); //dimx_p [12] @44
+                m.sizeX = META[11]; //dimx_p [12] @44
                 //in.skipBytes(4);
-                m.sizeY = (int) in.readUnsignedInt(); //dimy_p [13] @48
+                m.sizeY = META[12]; //dimy_p [13] @48
                 //in.skipBytes(4);
-                m.sizeZ = (int) in.readUnsignedInt(); //dimz_p [14] = nr of slices in current series  @52
+                m.sizeZ = META[13]; //dimz_p [14] = nr of slices in current series  @52
 
                 if(this.getSizeT() == 0) {
                     m.sizeT = 1;
@@ -134,9 +142,11 @@ public class ISQReader extends FormatReader {
                     m.sizeC = 1;
                 }
                 if(this.getSizeZ() == 0){
-                    m.sizeZ=1;
+                    m.sizeZ = 1;
                 }
-            }
+
+
+
                 float x_um = in.readInt(); //dimx_um [15]
                 float y_um = in.readInt(); //dimy_um [16]
                 float z_um = in.readInt(); //dimz_um [17]
@@ -154,10 +164,10 @@ public class ISQReader extends FormatReader {
 
             int offset;
             in.seek(124);
-            if(in.readInt() == 0){
-               offset = 512;
+            if(META[31] == 0){
+               offset = 1024 * 512 + 256;
             } else {
-               offset = 512 * (in.readInt() + 1);
+               offset = 1024 * 512 + 256 * (META[31] + 1);
             }
             for (int i = 0; i < this.getSizeC(); ++i) {
                     for (int j = 0; j < this.getSizeZ(); ++j) {
@@ -171,6 +181,12 @@ public class ISQReader extends FormatReader {
             addGlobalMeta("Image name", imageName);
             //addGlobalMeta("Creation date", date);
             addGlobalMeta("Number of dimensions", this.nDimensions);
+            addGlobalMeta("dataType", dataType);
+            addGlobalMeta("nr_of_bytes", nr_of_bytes);
+            addGlobalMeta("nr_of_blocks", nr_of_blocks);
+            addGlobalMeta("patient index", patient_index);
+            addGlobalMeta("scanner id", scanner_id);
+            addGlobalMeta("creation date", creation_date);
 
             LOGGER.info("Populating metadata");
             m.seriesMetadata = getSeriesMetadata();
