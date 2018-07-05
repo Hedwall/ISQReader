@@ -1,44 +1,28 @@
 package loci.formats.in;
 
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-
-import loci.common.Location;
 import loci.common.RandomAccessInputStream;
 import loci.formats.*;
 import loci.formats.meta.MetadataStore;
-
-import loci.formats.tools.ImageInfo;
 import ome.units.quantity.Length;
-import ome.units.quantity.Time;
-import ome.units.UNITS;
 
 
-
-//the images are 16-bit unsigned integers, 1024x1024, with a 512-byte header.
 
 public class ISQReader extends FormatReader {
 
 
     // -- Constants --
-    private static final String ISQ_MAGIC_STRING = "CTDATA-HEADER_V1";
-    private static boolean useMappedByteBuffer;
-    private static final String ISQ_FILE = "";
-
+    private static final String ISQ_checker = "CTDATA-HEADER_V1";
 
     // -- Fields --
-    private RandomAccessInputStream pixelFile;
-    public int[] offsets;
-    private long pixelOffset;
+    private int[] offsets;
     private short nDimensions;
 
     // -- Constructor --
     /** Constructs a new ISQ reader. */
     public ISQReader() {
         super("ISQ", "ISQ");
-        LOGGER.info("@constructor");
         suffixSufficient = false;
         domains = new String[]{"X-ray Imaging"};
         datasetDescription = "a single .isq file";
@@ -47,44 +31,36 @@ public class ISQReader extends FormatReader {
 
     // -- IFormatReader API methods --
 
-
-    /* @see loci.formats.IFormatReader#isThisType(RandomAccessInputStream) */
+    /** @see loci.formats.IFormatReader#isThisType(RandomAccessInputStream) */
     public boolean isThisType(RandomAccessInputStream stream) throws IOException {
         final int blockLen = 512;
         LOGGER.info("@type checker");
         if (!FormatTools.validStream(stream, blockLen, false)) {
             return false;
         } else {
-            //double check this, not sure if correct
             stream.seek(508L);
             String lastFour = stream.readString(4);
             return lastFour.equals("ISQ");
         }
-
     }
 
     /** @see loci.formats.IFormatReader#openBytes(int, byte[], int, int, int, int) */
     //Obtains a sub-image of the specified image plane into a pre-allocated byte array.
     public byte[] openBytes(int no, byte[] buf, int x, int y, int w, int h) throws FormatException, IOException {
         FormatTools.checkPlaneParameters(this, no, buf.length, x, y, w, h);
-        long planeSize = (long)FormatTools.getPlaneSize(this);
-        this.in.seek(512L + (long)no * planeSize);
+        this.in.seek((long)(this.offsets[no]));
         this.readPlane(this.in, x, y, w, h,0, buf);
 
-        //LOGGER.info("@openBytes method");
         return buf;
     }
 
     /** @see loci.formats.IFormatReader#close(boolean) */
     public void close(boolean fileOnly) throws IOException {
         super.close(fileOnly);
-        if (this.pixelFile != null) {
-            this.pixelFile.close();
-            this.nDimensions =0;
+        if (!fileOnly) {
+            this.offsets = null;
         }
     }
-    // fler cases att täcka?
-
 
     // -- Internal FormatReader API methods --
 
@@ -92,124 +68,99 @@ public class ISQReader extends FormatReader {
     @Override
     protected void initFile(String id) throws FormatException, IOException {
         super.initFile(id);
-        in = new RandomAccessInputStream(id);
-        in.order(true);
+        this.in = new RandomAccessInputStream(id);
+        this.in.order(true);
         boolean isSigned = true;
 
-        LOGGER.info("Looking for header file");
-        //String header = this.in.readString(128);
-
-            /*String magic = in.readString(16);
-            if (magic != ISQ_MAGIC_STRING) {
-                throw new FormatException("Header file not found.");
-            }*/
-
         LOGGER.info("Reading header");
+
             int [] META = new int[32];
             for(int i=0; i<META.length; i++){
-                META[i] = in.readInt();
+                META[i] = this.in.readInt();
             }
 
-            String imageName = in.readString(40); //name at char[40]
-            String first16 = in.readString(16);
-            boolean identifier = first16.startsWith("CTDATA-HEADER_V1");
-            //in.seek(16);
-            int dataType = META[4];
-            int nr_of_bytes = META[5];
-            int nr_of_blocks = META[6];
-            int patient_index = META[7];
-            int scanner_id = META[8];
-            String creation_date = in.readByteToString(4);
-            CoreMetadata m = core.get(0);
+            String imageName = this.in.readString(40); //name at char[40]
+            this.in.seek(0);
+            String first16checker = this.in.readString(16);
+            if(first16checker.startsWith(ISQ_checker)) {
 
+                int dataType = META[4];
+                int numBytes = META[5];
+                int numBlocks = META[6];
+                int patientIndex = META[7];
+                int scannerId = META[8];
 
-
-                //in.seek(43);
-                //in.skipBytes(27);
-                /**check position for seek() function against MatLab, which value is correct */
+                CoreMetadata m = (CoreMetadata)this.core.get(0);
 
                 //dimx_p is the dimension in pixels, dimx_um the dimension in microns.
-                m.sizeX = META[11]; //dimx_p [12] @44
+                m.sizeX = META[11]; //dimx_p
                 //in.skipBytes(4);
-                m.sizeY = META[12]; //dimy_p [13] @48
+                m.sizeY = META[12]; //dimy_p
                 //in.skipBytes(4);
-                m.sizeZ = META[13]; //dimz_p [14] = nr of slices in current series  @52
+                m.sizeZ = META[13]; //dimz_p
 
-                if(this.getSizeT() == 0) {
+                if (this.getSizeT() == 0) {
                     m.sizeT = 1;
                 }
-                if(this.getSizeC() == 0) {
+                if (this.getSizeC() == 0) {
                     m.sizeC = 1;
                 }
-                if(this.getSizeZ() == 0){
+                if (this.getSizeZ() == 0) {
                     m.sizeZ = 1;
                 }
 
+                int x_um = META[15]; //dimx_um
+                int y_um = META[16]; //dimy_um
+                int z_um = META[17]; //dimz_um
+
+                if (getImageCount() == 0) {
+                    m.imageCount = this.getSizeZ() * this.getSizeT() * this.getSizeC();
+                } else {
+                    m.imageCount = getImageCount();
+                }
+                this.offsets = new int[this.getImageCount()];
 
 
-                float x_um = in.readInt(); //dimx_um [15]
-                float y_um = in.readInt(); //dimy_um [16]
-                float z_um = in.readInt(); //dimz_um [17]
+                LOGGER.info("Calculating image offsets");
+                int offset;
 
-            LOGGER.info("Calculating image offsets");
-            /** read header bytes before image data  */
+                offset = 512 * (META[31] + 1) -1;
 
-            if(getImageCount() == 0){
-                m.imageCount = this.getSizeZ() * this.getSizeT() * this.getSizeC();
-            }else{
-                m.imageCount = getImageCount();
-            }
-            this.offsets = new int[this.getImageCount()];
-
-
-            int offset;
-            in.seek(124);
-            if(META[31] == 0){
-               offset = 1024 * 512 + 256;
-            } else {
-               offset = 1024 * 512 + 256 * (META[31] + 1);
-            }
-            for (int i = 0; i < this.getSizeC(); ++i) {
-                    for (int j = 0; j < this.getSizeZ(); ++j) {
-                        this.offsets[i * this.getSizeZ() + j] = offset + j * this.getSizeX() * this.getSizeY();
-                        //
+                for (int i = 0; i < this.getSizeC(); ++i) {
+                    for (int j = 0; j < this.getSizeZ(); j++) {
+                        this.offsets[i * this.getSizeZ() + j] = offset + j * this.getSizeX() * this.getSizeY() * 2;
                     }
                     offset += this.getSizeX() * this.getSizeY() * this.getSizeZ();
                 }
 
+                this.addGlobalMeta("Image name", imageName);
+                this.addGlobalMeta("Number of dimensions", this.nDimensions);
+                this.addGlobalMeta("first16", first16checker);
+                this.addGlobalMeta("dataType", dataType);
+                this.addGlobalMeta("nr_of_bytes", numBytes);
+                this.addGlobalMeta("nr_of_blocks", numBlocks);
+                this.addGlobalMeta("patient index", patientIndex);
+                this.addGlobalMeta("scanner id", scannerId);
 
-            addGlobalMeta("Image name", imageName);
-            //addGlobalMeta("Creation date", date);
-            addGlobalMeta("Number of dimensions", this.nDimensions);
-            addGlobalMeta("dataType", dataType);
-            addGlobalMeta("nr_of_bytes", nr_of_bytes);
-            addGlobalMeta("nr_of_blocks", nr_of_blocks);
-            addGlobalMeta("patient index", patient_index);
-            addGlobalMeta("scanner id", scanner_id);
-            addGlobalMeta("creation date", creation_date);
-
-            LOGGER.info("Populating metadata");
-            m.seriesMetadata = getSeriesMetadata();
-            m.dimensionOrder = "XYZCT";
-            m.rgb = false;
-            m.thumbSizeY = 128;
-            m.thumbSizeX = 128;
-            m.pixelType = FormatTools.pixelTypeFromBytes(2, isSigned, false);
-
-             /*m.imageCount = getImageCount();
-             if(m.imageCount == 0){
-                 m.imageCount = this.getSizeZ() * this.getSizeT() * this.getSizeC();
-              }   */
+                LOGGER.info("Populating metadata");
+                m.seriesMetadata = getSeriesMetadata();
+                m.dimensionOrder = "XYZCT";
+                m.thumbSizeY = 128;
+                m.thumbSizeX = 128;
+                m.pixelType = FormatTools.pixelTypeFromBytes(2, isSigned, false);
+                m.metadataComplete = true;
 
             LOGGER.info("Populating OME metadata");
             // The metadata store we're working with.
             MetadataStore store = this.makeFilterMetadata();
             MetadataTools.populatePixels(store,this);
-
+            store.setImageName(imageName, 0);
 
             if (this.getMetadataOptions().getMetadataLevel() != MetadataLevel.MINIMUM) {
+                String instrumentID = MetadataTools.createLSID("Instrument", new int[]{0});
+                store.setInstrumentID(instrumentID, 0);
+                store.setImageInstrumentRef(instrumentID, 0);
 
-                // populate Dimensions data
                 //Formats the input value for the physical size into a length in microns
                 Length sizeX = FormatTools.getPhysicalSizeX((double) x_um);
                 Length sizeY = FormatTools.getPhysicalSizeY((double) y_um);
@@ -223,9 +174,15 @@ public class ISQReader extends FormatReader {
                 if (sizeZ != null) {
                     store.setPixelsPhysicalSizeZ(sizeZ, 0);
                 }
+                for (int i = 0; i < this.getSizeC(); i++) {
+                    store.setDetectorSettingsOffset((double) this.offsets[i], i, 0);
+                    String detectorID = MetadataTools.createLSID("Detector", new int[]{0, i});
+                    store.setDetectorID(detectorID, 0, i);
+                    store.setDetectorType(this.getDetectorType("Other"), 0, i);
+                    store.setDetectorSettingsID(detectorID, 0, i);
 
-                for(int i = 0; i < this.getSizeC(); i++){
-                 store.setDetectorOffset((double)this.offsets[i], 1, 0);
+                    }
+
                 }
             }
 
